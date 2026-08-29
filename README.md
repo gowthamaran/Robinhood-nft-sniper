@@ -69,10 +69,16 @@ Open a second terminal and verify SSH access as `sniper` before disabling any ac
 
 ### 2. Harden the VPS
 
-At minimum: SSH keys only, provider-account MFA, automatic security updates, firewall, time sync, no unrelated applications, and no shared admin users. Review the included script before applying it:
+At minimum: SSH keys only, provider-account MFA, automatic security updates, firewall, time sync, no unrelated applications, and no shared admin users. Apply a small baseline directly:
 
 ```bash
-sudo bash scripts/vps_harden.sh
+sudo apt update
+sudo apt install -y ufw fail2ban unattended-upgrades chrony
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow OpenSSH
+sudo ufw --force enable
+sudo systemctl enable --now fail2ban chrony
 ```
 
 Do not run random “optimization” scripts. Do not install browser extensions, cracked software, trading panels, or Telegram bots on this VPS.
@@ -101,6 +107,7 @@ cd Robinhood-nft-sniper
 git log -1 --oneline
 less SECURITY.md
 less install.sh
+less scripts/vps_harden.sh
 ```
 
 For stronger supply-chain control, pin the commit SHA you reviewed before installing.
