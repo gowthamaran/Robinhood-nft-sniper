@@ -10,6 +10,35 @@ It does not automate a Robinhood account, bypass allowlists, create proofs, bypa
 
 > **Real-money warning:** Treat this as early-stage software. Start on testnet, use a brand-new low-value wallet, inspect the target ABI, run `doctor` and `arm --dry-run`, and keep the default `watch` mode until you understand every configured value.
 
+## One-line easy start
+
+On a clean Ubuntu 24.04 VPS, paste one command:
+
+```bash
+git clone https://github.com/gowthamaran/Robinhood-nft-sniper.git && bash Robinhood-nft-sniper/start.sh
+```
+
+Git intentionally does not execute repository code after `git clone`, so a literal clone-only installation is not technically possible or safe. The command above is the shortest safe flow: clone, then run the repository-owned launcher.
+
+The launcher automatically:
+
+1. Detects missing Ubuntu packages, including the exact `python3.12-venv` package.
+2. Repairs an incomplete virtual environment left by a failed installation.
+3. Installs the bot inside its isolated `.venv`.
+4. Opens a numbered `1 / 2 / 3` setup menu.
+5. Accepts RPC, WebSocket and verified ABI links only when selected.
+6. Accepts the private key only through a hidden local terminal prompt.
+7. Displays the complete safety summary.
+8. Starts the bot after the final `Y`.
+
+For an existing clone:
+
+```bash
+cd Robinhood-nft-sniper && git pull && bash start.sh
+```
+
+Running `bash start.sh` later presents three choices: start the saved configuration, create a new configuration, or run safety checks.
+
 ## Why this is faster than a normal mint bot
 
 | Normal bot after detection | This sniper before activation |
@@ -112,15 +141,13 @@ less scripts/vps_harden.sh
 
 For stronger supply-chain control, pin the commit SHA you reviewed before installing.
 
-### 5. Install
+### 5. Install manually
 
 ```bash
-bash install.sh
-export PATH="$HOME/.local/bin:$PATH"
-robinhood-sniper --help
+bash start.sh
 ```
 
-Persist the PATH line in your shell profile if needed. The installer creates a project virtual environment and `~/.robinhood-sniper/{secrets,logs,state}` with restrictive modes.
+The launcher creates a project virtual environment and `~/.robinhood-sniper/{secrets,logs,state,target}` with restrictive modes, then opens the numbered setup menu. No PATH editing is required.
 
 ### 6. Prepare inputs offline
 

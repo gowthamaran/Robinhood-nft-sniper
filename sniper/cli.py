@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, cast
 
 import typer
+from eth_account import Account
+from eth_account.signers.local import LocalAccount
 from pydantic import HttpUrl
 from rich.console import Console
 from rich.panel import Panel
@@ -40,6 +42,13 @@ from sniper.rpc.websocket import probe_new_heads
 from sniper.security.audit import audit_permissions
 from sniper.security.redaction import abbreviated, redact
 from sniper.service.systemd import install_unit, systemctl
+from sniper.setup.easy import (
+    SetupInputError,
+    download_abi,
+    function_signature,
+    mint_candidates,
+    parse_abi_input,
+)
 from sniper.storage import StateStore
 from sniper.wallet.keystore import create_keystore, load_local_account
 
@@ -63,6 +72,17 @@ def ask(prompt: str, *, default: str | None = None) -> str:
     if not value:
         raise typer.BadParameter("A value is required")
     return value
+
+
+def choose(title: str, options: list[str]) -> int:
+    console.print(f"\n[bold]{title}[/bold]")
+    for index, option in enumerate(options, start=1):
+        console.print(f"  [cyan]{index}[/cyan]) {option}")
+    while True:
+        raw = typer.prompt("Press a number").strip()
+        if raw.isdigit() and 1 <= int(raw) <= len(options):
+            return int(raw)
+        console.print(f"[yellow]Enter a number from 1 to {len(options)}.[/yellow]")
 
 
 async def validate_rpc(url: str, chain_id: int) -> float:
@@ -199,7 +219,251 @@ def setup() -> None:
     )
 
 
-def _unlock(config: AppConfig) -> Any:
+@app.command()
+def launch() -> None:
+    """Open the simple start/reconfigure menu."""
+    try:
+        config = load_config()
+    except FileNotFoundError:
+        easy_start()
+        return
+    action = choose(
+        "Robinhood NFT Sniper",
+        [
+            "Start with the saved configuration",
+            "Create a new numbered configuration",
+            "Run safety checks and exit",
+        ],
+    )
+    if action == 2:
+        easy_start()
+        return
+    if action == 3:
+        doctor()
+        return
+    console.print(
+        Panel(
+            f"Network: {config.network} ({config.chain_id})\n"
+            f"Wallet: {abbreviated(config.wallet.address)}\n"
+            f"Contract: {abbreviated(config.target.contract)}\n"
+            f"Mode: {config.mode.value.upper()}",
+            title="Saved configuration",
+        )
+    )
+    if typer.confirm("Press Y to unlock and start", default=False):
+        asyncio.run(_arm(False, False, None))
+
+
+@app.command("easy-start")
+def easy_start() -> None:
+    """Numbered one-run setup that saves configuration and can arm immediately."""
+    root = ensure_layout()
+    console.print(
+        Panel(
+            "Choose numbers, paste only the requested values, then press Y to start.\n"
+            "Your private key is hidden, encrypted locally, and never transmitted.",
+            title="Robinhood Chain NFT Sniper - Easy Start",
+        )
+    )
+
+    network_choice = choose(
+        "1. Select the network",
+        [
+            "Robinhood Chain Testnet (recommended first run)",
+            "Robinhood Chain Mainnet (real funds)",
+        ],
+    )
+    network_name: Literal["testnet", "mainnet"] = "testnet" if network_choice == 1 else "mainnet"
+    network = get_network(network_name)
+
+    rpc_choice = choose(
+        "2. Select RPC setup",
+        [
+            "Use Robinhood public RPC (easy; may be rate-limited)",
+            "Use one custom HTTPS RPC (recommended for speed)",
+            "Use a custom RPC plus backup RPCs (best reliability)",
+        ],
+    )
+    if rpc_choice == 1:
+        primary = network.public_rpc
+        backups: list[str] = []
+    else:
+        primary = ask("Paste your Robinhood Chain HTTPS RPC link")
+        backups = []
+        if rpc_choice == 3:
+            backup_text = typer.prompt(
+                "Paste backup HTTPS RPC links separated by commas (maximum 5)", default=""
+            ).strip()
+            backups = [value.strip() for value in backup_text.split(",") if value.strip()]
+            if len(backups) > 5:
+                raise typer.BadParameter("A maximum of five backup RPCs is supported")
+    console.print("Checking RPC chain ID and latency...")
+    primary_latency = asyncio.run(validate_rpc(primary, network.chain_id))
+    for url in backups:
+        asyncio.run(validate_rpc(url, network.chain_id))
+    console.print(f"[green]RPC ready: {primary_latency:.1f} ms[/green]")
+
+    websocket_choice = choose(
+        "3. WebSocket trigger",
+        [
+            "Skip WebSocket and use fast RPC/feed monitoring",
+            "Paste a custom WebSocket RPC link (faster event wake-up)",
+        ],
+    )
+    websocket: str | None = None
+    if websocket_choice == 2:
+        websocket = ask("Paste your wss:// Robinhood Chain WebSocket link")
+        subscription = asyncio.run(probe_new_heads(websocket))
+        console.print(f"[green]WebSocket ready: {abbreviated(subscription)}[/green]")
+
+    console.print(
+        Panel(
+            "Use a brand-new, low-value mint wallet.\n"
+            "Paste the key only into the hidden prompt below. It will not appear on screen.",
+            title="4. Secure wallet",
+        )
+    )
+    private_key = getpass.getpass("Private key (hidden): ").strip()
+    password = getpass.getpass("Create a keystore password (12+ characters): ")
+    if password != getpass.getpass("Repeat the keystore password: "):
+        raise typer.BadParameter("The keystore passwords do not match")
+    try:
+        account = cast(LocalAccount, Account.from_key(private_key))
+    except Exception as exc:
+        raise typer.BadParameter("The private key is invalid") from exc
+    keystore_path = root / "secrets" / "wallet.json"
+    address = create_keystore(private_key, password, keystore_path)
+    private_key = ""
+    password = ""
+    console.print(f"[green]Encrypted wallet ready: {abbreviated(address)}[/green]")
+
+    console.print("\n[bold]5. NFT mint target[/bold]")
+    contract = validate_contract_address(ask("Paste the NFT contract address"))
+    abi_choice = choose(
+        "Select how to provide the verified ABI",
+        [
+            "Paste a direct HTTPS ABI/explorer API link",
+            "Enter the path to an ABI JSON file already on this VPS",
+        ],
+    )
+    if abi_choice == 1:
+        abi_url = ask("Paste the direct HTTPS ABI JSON link")
+        abi_path_obj = root / "target" / "abi.json"
+        try:
+            asyncio.run(download_abi(abi_url, abi_path_obj))
+        except Exception as exc:
+            raise typer.BadParameter(redact(exc)) from exc
+    else:
+        abi_path_obj = Path(ask("Enter the ABI JSON file path")).expanduser().resolve()
+    abi_path = str(abi_path_obj)
+    abi = load_abi(abi_path)
+    candidates = mint_candidates(abi)
+    if not candidates:
+        raise typer.BadParameter("The ABI contains no payable/nonpayable mint functions")
+    function_choice = choose(
+        "Select the exact mint function",
+        [function_signature(item) for item in candidates],
+    )
+    selected_function = candidates[function_choice - 1]
+    function = str(selected_function["name"])
+    inputs = selected_function.get("inputs", [])
+    arguments: list[Any] = []
+    for index, item in enumerate(inputs, start=1):
+        type_name = str(item.get("type", "string"))
+        input_name = str(item.get("name") or f"argument_{index}")
+        while True:
+            raw_value = ask(f"Enter {input_name} ({type_name})")
+            try:
+                arguments.append(parse_abi_input(type_name, raw_value))
+                break
+            except SetupInputError as exc:
+                console.print(f"[yellow]{exc}[/yellow]")
+    resolve_function(abi, function, len(arguments))
+
+    suggested_quantity = "1"
+    for item, value in zip(inputs, arguments, strict=True):
+        name = str(item.get("name", "")).lower()
+        if name in {"quantity", "amount", "count", "qty"} and isinstance(value, int):
+            suggested_quantity = str(value)
+            break
+    quantity = int(ask("NFT quantity for the safety limits", default=suggested_quantity))
+    value_eth = Decimal(ask("Exact total ETH value sent to the mint", default="0"))
+
+    console.print("\n[bold]6. Hard spending limits[/bold]")
+    max_price = Decimal(
+        ask("Maximum price per NFT in ETH", default=str(max(value_eth, Decimal("0.001"))))
+    )
+    max_fee = Decimal(ask("Maximum network fee in ETH", default="0.005"))
+    max_total = Decimal(ask("Maximum total spend in ETH", default=str(value_eth + max_fee)))
+
+    mode_choice = choose(
+        "7. Select execution mode",
+        [
+            "WATCH - check and report only; never broadcast",
+            "CONFIRM - ask once more when the mint opens",
+            "AUTO - broadcast automatically after every safety check passes",
+        ],
+    )
+    mode = (ExecutionMode.WATCH, ExecutionMode.CONFIRM, ExecutionMode.AUTO)[mode_choice - 1]
+
+    telegram = TelegramSettings()
+    telegram_choice = choose(
+        "8. Telegram notifications",
+        ["No Telegram", "Enable notification-only Telegram"],
+    )
+    if telegram_choice == 2:
+        token = getpass.getpass("Telegram bot token (hidden): ").strip()
+        chat_id = ask("Telegram chat ID")
+        asyncio.run(notify(token, chat_id, "Robinhood NFT Sniper: setup test successful"))
+        telegram = TelegramSettings(enabled=True, bot_token=token, chat_id=chat_id)
+
+    config = AppConfig(
+        network=network_name,
+        chain_id=network.chain_id,
+        rpc=RPCSettings(
+            primary=HttpUrl(primary),
+            backups=[HttpUrl(item) for item in backups],
+            websocket=websocket,
+        ),
+        wallet=WalletSettings(address=address, keystore_path=str(keystore_path)),
+        target=TargetSettings(
+            name=f"{function} NFT mint",
+            contract=contract,
+            abi_path=abi_path,
+            function=function,
+            arguments=arguments,
+            quantity=quantity,
+            transaction_value_eth=value_eth,
+        ),
+        limits=LimitSettings(
+            max_price_per_nft_eth=max_price,
+            max_network_fee_eth=max_fee,
+            max_total_spend_eth=max_total,
+        ),
+        mode=mode,
+        telegram=telegram,
+    )
+    save_config(config)
+
+    console.print(
+        Panel(
+            f"Network: {network.name} ({network.chain_id})\n"
+            f"Wallet: {abbreviated(address)}\n"
+            f"Contract: {abbreviated(contract)}\n"
+            f"Function: {function}\nQuantity: {quantity}\n"
+            f"Mint value: {value_eth} ETH\nMax fee: {max_fee} ETH\n"
+            f"Max total: {max_total} ETH\nMode: {mode.value.upper()}\n"
+            "The key is encrypted locally. Final simulation and limits remain mandatory.",
+            title="Ready to start",
+        )
+    )
+    if not typer.confirm("Press Y to start the bot now", default=False):
+        console.print("Configuration saved. Start later with: bash start.sh")
+        return
+    asyncio.run(_arm(False, False, None, unlocked_account=account))
+
+
+def _unlock(config: AppConfig) -> LocalAccount:
     password = None
     if not os.getenv("ROBINHOOD_SNIPER_PRIVATE_KEY"):
         password = getpass.getpass("Keystore password: ")
@@ -306,9 +570,14 @@ def benchmark(rounds: Annotated[int, typer.Option(min=1, max=20)] = 5) -> None:
     asyncio.run(_benchmark(rounds))
 
 
-async def _arm(dry_run: bool, rearm: bool, watch_timeout: float | None) -> None:
+async def _arm(
+    dry_run: bool,
+    rearm: bool,
+    watch_timeout: float | None,
+    unlocked_account: LocalAccount | None = None,
+) -> None:
     config = load_config()
-    account = _unlock(config)
+    account = unlocked_account or _unlock(config)
     engine = MintEngine(config, account, StateStore())
     try:
         prepared = await engine.prepare(allow_rearm=rearm)
