@@ -1,362 +1,123 @@
 # Robinhood Chain NFT Sniper
 
-A security-first, VPS-native NFT mint bot specialized for **Robinhood Chain**. It stays prepared before a legitimate public mint opens, then performs the minimum safe hot path:
+A fast, self-hosted NFT mint bot built specifically for Robinhood Chain.
+
+It sits ready on your VPS before a mint opens. When the configured mint becomes available, it checks the contract, simulates the transaction, enforces your spending limits, signs locally and submits the transaction.
+
+This is not a Robinhood account bot. It does not ask for your Robinhood login, bypass allowlists or create fake proofs.
+
+## Installation
+
+Use a clean Ubuntu 24.04 VPS. Paste this single command:
+
+```bash
+if [ -d Robinhood-nft-sniper/.git ]; then git -C Robinhood-nft-sniper pull --ff-only; else git clone https://github.com/gowthamaran/Robinhood-nft-sniper.git; fi && bash Robinhood-nft-sniper/start.sh
+```
+
+That is the only installation command you need.
+
+The launcher checks your VPS, installs missing Python packages, repairs failed installations, creates an isolated environment and opens the setup menu.
+
+## How to use it
+
+The bot guides you using simple numbered choices.
+
+### 1. Choose the network
 
 ```text
-trigger -> verify chain/state -> refresh nonce/fee/balance -> simulate -> enforce limits -> sign locally -> broadcast -> track
+1) Robinhood Chain Testnet
+2) Robinhood Chain Mainnet
 ```
 
-It does not automate a Robinhood account, bypass allowlists, create proofs, bypass wallet limits, solve CAPTCHAs, exploit contracts, or guarantee a mint. It interacts only with public EVM contracts and configured RPC infrastructure.
+Use testnet first. Mainnet uses real funds.
 
-> **Real-money warning:** Treat this as early-stage software. Start on testnet, use a brand-new low-value wallet, inspect the target ABI, run `doctor` and `arm --dry-run`, and keep the default `watch` mode until you understand every configured value.
+### 2. Choose your RPC setup
 
-## One-line easy start
-
-On a clean Ubuntu 24.04 VPS, paste one command:
-
-```bash
-git clone https://github.com/gowthamaran/Robinhood-nft-sniper.git && bash Robinhood-nft-sniper/start.sh
+```text
+1) Robinhood public RPC
+2) Custom RPC
+3) Custom RPC + backup RPCs
 ```
 
-Git intentionally does not execute repository code after `git clone`, so a literal clone-only installation is not technically possible or safe. The command above is the shortest safe flow: clone, then run the repository-owned launcher.
+A good custom RPC is recommended when speed matters. The bot validates the chain ID and checks latency before continuing.
 
-The launcher automatically:
+### 3. Add your wallet
 
-1. Detects missing Ubuntu packages, including the exact `python3.12-venv` package.
-2. Repairs an incomplete virtual environment left by a failed installation.
-3. Installs the bot inside its isolated `.venv`.
-4. Opens a numbered `1 / 2 / 3` setup menu.
-5. Accepts RPC, WebSocket and verified ABI links only when selected.
-6. Accepts the private key only through a hidden local terminal prompt.
-7. Displays the complete safety summary.
-8. Starts the bot after the final `Y`.
+Use a new, low-value wallet made only for minting.
 
-For an existing clone:
+The private key is entered through a hidden terminal prompt. It is encrypted locally on your VPS and never sent to us, Telegram or any external server.
 
-```bash
-cd Robinhood-nft-sniper && git pull && bash start.sh
+### 4. Add the mint
+
+Enter the NFT contract address, then provide either:
+
+```text
+1) A direct HTTPS link to the verified ABI
+2) An ABI JSON file already on your VPS
 ```
 
-Running `bash start.sh` later presents three choices: start the saved configuration, create a new configuration, or run safety checks.
+The bot reads the ABI and shows only mint-like functions such as `mint`, `claim`, `purchase` or `buy`. Choose the correct function and enter any required quantity, proof, signature or voucher.
 
-## Why this is faster than a normal mint bot
+The bot will never create or fake authorization for you.
 
-| Normal bot after detection | This sniper before activation |
-|---|---|
-| Starts the process | Process is already resident on the VPS |
-| Loads the ABI and creates the contract object | ABI is loaded and mint function resolved |
-| Builds all calldata | Static calldata is precomputed |
-| Opens RPC connections | HTTP connection pools and DNS cache are warm |
-| Selects an RPC from one ping | Configured RPCs are scored by latency, reliability and block freshness |
-| Fetches every input sequentially | Nonce, gas price, balance and chain ID refresh concurrently |
-| May broadcast without a final check | Final `eth_call` simulation is mandatory |
-| Often trusts a mutable “max gas” UI | Price, fee and total-spend limits are enforced in the execution path |
-| May keep a plaintext key in source or `.env` | Encrypted local keystore and hidden password prompt |
-| Can double-submit after restart | Persistent wallet/contract/nonce state and explicit rearm |
+### 5. Set your limits
 
-Robinhood Chain documents a first-come-first-served sequencing model. Reducing avoidable client-side preparation delay can therefore matter. It still cannot guarantee network arrival order, successful inclusion, availability, allocation, profit, or ownership. Other users may be closer to the sequencer, target state can change between simulation and execution, and the network or mint contract can reject the transaction.
+You choose:
 
-## Security and speed are designed together
+- maximum NFT price;
+- maximum network fee;
+- maximum total spend.
 
-- **No custody backend:** the application has no server that receives a key.
-- **Local signing:** the key is decrypted only in the running VPS process at signing time.
-- **Encrypted at rest:** Web3-compatible keystore, password protected, directory mode `700`, file mode `600`.
-- **No secrets in SQLite:** state stores public wallet, contract, nonce, hash, state and timings only.
-- **Central redaction:** private-key-shaped strings, Telegram tokens and common RPC credentials are removed from logs/output.
-- **Warm safe path:** ABI parsing, address validation and calldata encoding happen before activation.
-- **No unsafe speed trick:** simulation and hard limits are never skipped; retries cannot raise limits.
-- **Same-transaction redundancy:** at most two healthy configured RPCs receive the same signed raw transaction. No competing nonces or replacement spam.
-- **Strict network lock:** only chain IDs `46630` (testnet) and `4663` (mainnet) are accepted.
-- **No arbitrary endpoint discovery:** the pool uses only endpoints you configure.
+These are hard limits. The bot will block the transaction if any limit is exceeded.
 
-Read [SECURITY.md](SECURITY.md) and [docs/security.md](docs/security.md) before using a funded wallet.
+### 6. Choose how it runs
 
-## Supported networks
-
-| Network | Chain ID | Native gas | Public RPC | Use |
-|---|---:|---|---|---|
-| Robinhood Chain Testnet | 46630 | ETH | `https://rpc.testnet.chain.robinhood.com` | First run, recommended |
-| Robinhood Chain Mainnet | 4663 | ETH | `https://rpc.mainnet.chain.robinhood.com` | Real funds; explicit confirmation |
-
-Public endpoints may be rate-limited. Use a reputable custom HTTPS RPC plus one or two backups and a WebSocket RPC for a production attempt. Never paste provider credentials into a public issue or screenshot.
-
-## Exact VPS installation
-
-Recommended host: a clean Ubuntu 24.04 LTS VPS in a region with low measured latency to your configured provider. Ubuntu 22.04 works after installing Python 3.12 from a trusted package source.
-
-### 1. Create a non-root user
-
-From your VPS provider console or root shell:
-
-```bash
-adduser sniper
-usermod -aG sudo sniper
-rsync --archive --chown=sniper:sniper ~/.ssh /home/sniper
+```text
+1) WATCH   - check and report only
+2) CONFIRM - ask before broadcasting
+3) AUTO    - broadcast automatically after all checks pass
 ```
 
-Open a second terminal and verify SSH access as `sniper` before disabling any access method.
+Review the final summary and press `Y` to start.
 
-### 2. Harden the VPS
+The next time you run `bash Robinhood-nft-sniper/start.sh`, you can start the saved configuration, create a new one or run safety checks.
 
-At minimum: SSH keys only, provider-account MFA, automatic security updates, firewall, time sync, no unrelated applications, and no shared admin users. Apply a small baseline directly:
+## Why it is better than a normal mint bot
 
-```bash
-sudo apt update
-sudo apt install -y ufw fail2ban unattended-upgrades chrony
-sudo ufw default deny incoming
-sudo ufw default allow outgoing
-sudo ufw allow OpenSSH
-sudo ufw --force enable
-sudo systemctl enable --now fail2ban chrony
-```
+Most mint bots start preparing after they notice a mint is open. This bot prepares before it opens.
 
-Do not run random “optimization” scripts. Do not install browser extensions, cracked software, trading panels, or Telegram bots on this VPS.
+- The ABI and mint calldata are prepared in advance.
+- RPC connections stay warm.
+- Custom and backup RPCs are ranked using speed, reliability and block freshness.
+- Wrong-chain RPCs are rejected.
+- Nonce, gas, balance and chain ID are refreshed together.
+- Every automatic transaction is simulated immediately before signing.
+- The same signed transaction can be sent through two healthy RPCs without creating competing transactions.
+- Duplicate protection prevents accidental repeated mints after a restart.
+- Real timing measurements are recorded instead of showing fake benchmark numbers.
 
-### 3. Install Python and Git
+Robinhood Chain uses first-come-first-served transaction ordering. Reducing avoidable preparation time may help, but no bot can guarantee that your transaction arrives first or that a mint succeeds.
 
-Ubuntu 24.04:
+## Safety and security
 
-```bash
-sudo apt update
-sudo apt install -y git python3 python3-venv python3-pip build-essential chrony
-sudo systemctl enable --now chrony
-```
+- Your private key is encrypted and stored only on your VPS.
+- Signing happens locally.
+- Keys are never stored in logs or SQLite.
+- RPC credentials and Telegram tokens are redacted from output.
+- Telegram is notification-only and cannot execute transactions.
+- The bot supports only Robinhood Chain mainnet and testnet.
+- A final simulation is mandatory in AUTO mode.
+- Price, fee and total-spend limits cannot be silently increased.
+- ABI downloads reject insecure links, private-network addresses and oversized files.
 
-Verify Python 3.12 or newer:
+No software can protect a private key on an already-compromised VPS. Use SSH keys, enable MFA with your VPS provider, keep Ubuntu updated and never run unrelated software on the same server.
 
-```bash
-python3 --version
-```
+Never use your main wallet. Fund the mint wallet only with what you are prepared to lose, and move unused funds out after the mint.
 
-### 4. Clone and inspect
+## DYOR
 
-```bash
-git clone https://github.com/gowthamaran/Robinhood-nft-sniper.git
-cd Robinhood-nft-sniper
-git log -1 --oneline
-less SECURITY.md
-less install.sh
-less scripts/vps_harden.sh
-```
+This project is independent and is not affiliated with or endorsed by Robinhood.
 
-For stronger supply-chain control, pin the commit SHA you reviewed before installing.
+NFT mints, smart contracts and automated transactions can fail or result in financial loss. Verify the official contract, ABI, mint price, wallet limits and project links yourself before starting the bot.
 
-### 5. Install manually
-
-```bash
-bash start.sh
-```
-
-The launcher creates a project virtual environment and `~/.robinhood-sniper/{secrets,logs,state,target}` with restrictive modes, then opens the numbered setup menu. No PATH editing is required.
-
-### 6. Prepare inputs offline
-
-Have these ready:
-
-1. Testnet or mainnet selection.
-2. Custom HTTPS RPC and optional backups from providers you chose.
-3. Optional WebSocket RPC.
-4. A new dedicated low-value wallet private key.
-5. A strong, unique keystore password (12+ characters; a password manager-generated phrase is better).
-6. Exact NFT contract address on the selected chain.
-7. Verified ABI JSON file. Never use guessed calldata.
-8. Exact mint function, ordered arguments, exact transaction value, quantity and hard limits.
-9. Any legitimate proof, signature or voucher issued to your wallet. The bot does not create authorization.
-
-### 7. Run secure setup
-
-```bash
-robinhood-sniper setup
-```
-
-The key prompt is hidden. Paste it only into that local VPS prompt. Do not pass it as a CLI argument, send it to Telegram, commit it, put it in a support ticket, or share it with anyone claiming to “configure the bot.”
-
-The optional `ROBINHOOD_SNIPER_PRIVATE_KEY` environment variable exists for advanced ephemeral automation but is less safe at rest and will make `security-check` fail. The encrypted keystore is the normal path.
-
-### 8. Verify before arming
-
-```bash
-robinhood-sniper security-check
-robinhood-sniper doctor
-robinhood-sniper benchmark --rounds 5
-robinhood-sniper config show
-robinhood-sniper wallet status
-```
-
-`doctor` validates config, chain ID, RPC availability, bytecode, wallet balance, ABI/function, local permissions, SQLite and time synchronization. Any critical failure means **NOT READY**.
-
-### 9. Dry-run on testnet
-
-```bash
-robinhood-sniper arm --dry-run --watch-timeout 300
-```
-
-This monitors until `eth_call` indicates the configured mint would succeed, refreshes dynamic data, estimates gas, enforces hard limits and reports real timings. It does not sign or broadcast.
-
-### 10. Choose execution mode
-
-The wizard writes one of:
-
-- `watch`: alerts/status and dry calculations; never signs or broadcasts.
-- `confirm`: final simulation and limits, then asks in the terminal before signing.
-- `auto`: signs/broadcasts only after every check passes. Setup requires typing `ENABLE AUTO`.
-
-Edit mode by rerunning setup for now. Never switch to auto before a successful testnet dry run and a full review of `config show`.
-
-### 11. Arm
-
-Keep the terminal attached with `tmux` for initial tests:
-
-```bash
-sudo apt install -y tmux
-tmux new -s sniper
-robinhood-sniper arm
-```
-
-Detach with `Ctrl-b`, then `d`; reconnect with:
-
-```bash
-tmux attach -t sniper
-```
-
-After a broadcast, the duplicate guard prevents another execution for the same wallet/target. A second attempt requires:
-
-```bash
-robinhood-sniper arm --rearm
-```
-
-This asks for explicit confirmation. Rearm can mint again; use it only when intentional.
-
-## Target configuration
-
-Change the target without rerunning wallet setup:
-
-```bash
-robinhood-sniper target set \
-  0xYourContract \
-  /absolute/path/to/verified-abi.json \
-  mint \
-  --arguments-json '[1]' \
-  --quantity 1 \
-  --value-eth 0.05
-```
-
-Then rerun:
-
-```bash
-robinhood-sniper doctor
-robinhood-sniper arm --dry-run
-```
-
-Argument order and types must match exactly. A mint requiring a Merkle proof, server voucher or signed authorization works only when the legitimate value issued for this wallet is supplied. Missing authorization is a stop condition.
-
-## RPC race and failover
-
-The pool measures configured endpoints across repeated probes. Its score combines:
-
-- rolling request latency;
-- success/failure rate;
-- current block freshness.
-
-The hot path tries endpoints in current health order. The signed raw transaction is sent to at most the top two configured endpoints; both carry the identical hash and nonce. A timeout or duplicate response does not create a different transaction. Benchmark is read-only:
-
-```bash
-robinhood-sniper benchmark --rounds 10
-```
-
-One low ping is not enough. Test near the actual event time and watch reliability/block lag.
-
-## Sequencer feed
-
-Robinhood publishes a Nitro sequencer feed at `wss://feed.{network}.chain.robinhood.com`. This is not a standard Ethereum `eth_subscribe` socket. The included listener understands the outer Nitro JSON broadcast envelope for health/sequence observations; it deliberately does not pretend to decode every compressed transaction.
-
-Execution uses final RPC state and simulation and never depends solely on the feed. The documented sequencer RPC endpoint can accept raw transactions, but this release does not route directly to it automatically. That behavior should be enabled only after compatibility and failure handling are tested for Robinhood Chain. See [docs/sequencer.md](docs/sequencer.md).
-
-## Systemd service
-
-Initial setup/password entry is interactive. A systemd service cannot safely ask for a keystore password after reboot. Use `tmux` for the safest default. The unit generator supports non-interactive operation only when an approved secret-injection method is available; do not put the password or private key in the unit file.
-
-Install the hardened unit:
-
-```bash
-sudo -E robinhood-sniper service install
-sudo systemctl enable robinhood-sniper
-```
-
-Commands:
-
-```bash
-sudo robinhood-sniper service start
-sudo robinhood-sniper service stop
-sudo robinhood-sniper service restart
-sudo robinhood-sniper service status
-sudo journalctl -u robinhood-sniper -f
-```
-
-Do not enable unattended auto mode until you have a secure external secret-injection method and have verified restart/duplicate behavior on testnet.
-
-## Other commands
-
-```bash
-robinhood-sniper stats
-robinhood-sniper profile --iterations 1000
-robinhood-sniper config show
-robinhood-sniper wallet status
-robinhood-sniper wallet replace
-```
-
-`stats` reports actual recorded stage timings. `profile` measures local ABI encoding on this machine. No benchmark values are hardcoded or marketed as guaranteed.
-
-## Architecture
-
-```mermaid
-flowchart TD
-    A["Dedicated VPS process"] --> B["Warm configured RPC pool"]
-    A --> C["Optional WebSocket / Nitro feed"]
-    A --> D["Encrypted local keystore"]
-    B --> E["Final simulation + limits"]
-    D --> F["Local signer"]
-    E --> F
-    F --> G["Same signed transaction"]
-    G --> H["Robinhood Chain sequencer"]
-```
-
-The feed is an observation signal; it is not a key path or custody component. See [docs/architecture.md](docs/architecture.md).
-
-## Known limitations in v0.1.0
-
-- ABI must be supplied locally; automatic explorer ABI download is intentionally omitted to avoid trusting the wrong source.
-- The generic trigger is “the exact configured call successfully simulates.” Specialized sale-state/event adapters can be added per contract.
-- Proxy implementation discovery and ERC interface probing are reported conservatively, not used to guess calldata.
-- Nitro feed is monitoring-only and not decoded into arbitrary contract calls.
-- Direct sequencer submission is disabled until Robinhood-specific behavior is tested.
-- Telegram code is notification-only and is not exposed as a remote command channel.
-- Systemd cannot safely unlock an encrypted keystore without an external secret source.
-- Local Anvil integration requires Foundry/Anvil installed separately.
-
-## Development and verification
-
-```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -e '.[dev]'
-ruff format --check .
-ruff check .
-mypy sniper
-pytest -q
-bash scripts/check_no_secrets.sh
-```
-
-The test suite uses generated ephemeral keys only. CI never uses a real wallet, live mint, or paid RPC secret.
-
-## Uninstall
-
-```bash
-bash uninstall.sh
-```
-
-This removes the executable link but preserves `~/.robinhood-sniper`. That directory contains the encrypted wallet and state. Delete it manually only after confirming you have no need for the keystore or transaction records.
-
-## Disclaimer
-
-This is open-source infrastructure, not financial advice, a Robinhood product, or an endorsement by Robinhood. NFT mints are risky. Smart-contract bugs, malicious ABIs, compromised VPS hosts, phishing, network congestion, failed transactions, fees, and total loss are possible. You are solely responsible for reviewing code, securing the machine, verifying the official contract and ABI, respecting mint terms, complying with applicable law, and setting limits you can afford.
+**Always DYOR. Never risk money you cannot afford to lose.**

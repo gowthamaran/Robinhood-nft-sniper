@@ -78,15 +78,29 @@ if ! python3 -c 'import ensurepip' >/dev/null 2>&1; then
   as_root apt-get install -y "python${python_version}-venv"
 fi
 
-if [[ -d .venv && ! -x .venv/bin/python ]]; then
-  warn "Removing the incomplete virtual environment from the failed installation."
-  mv .venv ".venv.failed.$(date +%s)"
+venv_broken=false
+if [[ -d .venv ]]; then
+  if [[ ! -x .venv/bin/python ]]; then
+    venv_broken=true
+  elif ! .venv/bin/python -c \
+    'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)' >/dev/null 2>&1; then
+    venv_broken=true
+  elif ! .venv/bin/python -m pip --version >/dev/null 2>&1; then
+    venv_broken=true
+  fi
 fi
 
-if [[ ! -x .venv/bin/python ]]; then
+if [[ "${venv_broken}" == true ]]; then
+  failed_venv=".venv.failed.$(date +%s)"
+  warn "The previous virtual environment is incomplete. Moving it to ${failed_venv}."
+  mv .venv "${failed_venv}"
+fi
+
+if [[ ! -x .venv/bin/python ]] || ! .venv/bin/python -m pip --version >/dev/null 2>&1; then
   python3 -m venv .venv
 fi
 
+.venv/bin/python -m ensurepip --upgrade
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/pip install .
 

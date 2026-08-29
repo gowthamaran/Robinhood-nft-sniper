@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 - 2026-08-29
+
+- Detects and rebuilds virtual environments where Python exists but pip is missing.
+- Replaced the README with a short human guide focused on installation, usage, advantages and safety.
+- Added one installation command that updates an existing checkout or clones a new one.
+
 ## 0.2.0 - 2026-08-29
 
 - Added one-line `git clone ... && bash .../start.sh` installation.
