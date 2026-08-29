@@ -1,0 +1,9 @@
+aiohttp>=3.10,<4
+cryptography>=43,<47
+eth-account>=0.13,<0.14
+pydantic>=2.9,<3
+python-dotenv>=1.0,<2
+rich>=13.9,<15
+typer>=0.12,<1
+web3>=7.5,<8
+websockets>=13,<16
