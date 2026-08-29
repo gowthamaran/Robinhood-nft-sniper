@@ -49,14 +49,20 @@ The private key is entered through a hidden terminal prompt. It is encrypted loc
 
 ### 4. Add the mint
 
-Enter the NFT contract address, then provide either:
+Choose the easy OpenSea option or the manual contract option:
 
 ```text
-1) A direct HTTPS link to the verified ABI
-2) An ABI JSON file already on your VPS
+1) Paste an OpenSea NFT mint link
+2) Paste the NFT contract and provide its verified ABI
 ```
 
-The bot reads the ABI and shows only mint-like functions such as `mint`, `claim`, `purchase` or `buy`. Choose the correct function and enter any required quantity, proof, signature or voucher.
+With option 1, paste the official `https://opensea.io/collection/...` or `https://opensea.io/drops/...` link. The bot verifies that the drop is on Robinhood Chain, gets the contract and builds the mint transaction through OpenSea's official Drops API. You do not need to find a contract address, ABI or mint function.
+
+The bot automatically creates a free OpenSea API key and keeps it in a local file readable only by your VPS user. This is an OpenSea data key, not your wallet key. Free keys expire after seven days; the bot securely replaces an expired key when needed.
+
+The OpenSea link option is for Robinhood Chain mainnet drops listed on OpenSea. For another mint, choose option 2, enter the contract and provide either a direct HTTPS link to its verified ABI or an ABI JSON file already on the VPS.
+
+For a manual target, the bot shows only mint-like functions such as `mint`, `claim`, `purchase` or `buy`. Choose the correct one and enter any required quantity, proof, signature or voucher.
 
 The bot will never create or fake authorization for you.
 
@@ -86,7 +92,8 @@ The next time you run `bash Robinhood-nft-sniper/start.sh`, you can start the sa
 
 Most mint bots start preparing after they notice a mint is open. This bot prepares before it opens.
 
-- The ABI and mint calldata are prepared in advance.
+- Manual mint calldata is prepared in advance; OpenSea calldata is requested only when the drop is active so it stays current.
+- OpenSea links use the official Drops API instead of scraping a web page or guessing a mint function.
 - RPC connections stay warm.
 - Custom and backup RPCs are ranked using speed, reliability and block freshness.
 - Wrong-chain RPCs are rejected.
@@ -109,6 +116,9 @@ Robinhood Chain uses first-come-first-served transaction ordering. Reducing avoi
 - A final simulation is mandatory in AUTO mode.
 - Price, fee and total-spend limits cannot be silently increased.
 - ABI downloads reject insecure links, private-network addresses and oversized files.
+- OpenSea links must use the real `opensea.io` HTTPS domain; item and listing links are rejected.
+- OpenSea transaction data must be for Robinhood Chain and pass strict address, calldata and value checks.
+- OpenSea API responses still go through the same on-chain simulation and hard spending limits before signing.
 
 No software can protect a private key on an already-compromised VPS. Use SSH keys, enable MFA with your VPS provider, keep Ubuntu updated and never run unrelated software on the same server.
 

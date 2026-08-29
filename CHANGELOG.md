@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 - 2026-08-29
+
+- Added an OpenSea mint-link option for Robinhood Chain mainnet drops.
+- Builds current mint transactions through OpenSea's official Drops API without requiring an ABI.
+- Auto-creates and rotates a restricted local OpenSea API key.
+- Applies chain, contract-code, calldata, simulation and spending-limit checks to OpenSea mints.
+- Updated the README with the new two-choice target setup.
+
 ## 0.2.1 - 2026-08-29
 
 - Detects and rebuilds virtual environments where Python exists but pip is missing.

@@ -37,6 +37,7 @@ from sniper.contract.analyzer import load_abi, resolve_function, validate_contra
 from sniper.mint.engine import MintEngine
 from sniper.models import ExecutionMode
 from sniper.network.robinhood import get_network
+from sniper.opensea import OpenSeaClient, OpenSeaError, parse_opensea_mint_url
 from sniper.rpc.client import RPCClient, RPCPool
 from sniper.rpc.websocket import probe_new_heads
 from sniper.security.audit import audit_permissions
@@ -55,7 +56,7 @@ from sniper.wallet.keystore import create_keystore, load_local_account
 app = typer.Typer(no_args_is_help=True, help="Security-first Robinhood Chain NFT sniper")
 config_app = typer.Typer(help="Inspect or update configuration")
 wallet_app = typer.Typer(help="Inspect or replace the local encrypted wallet")
-target_app = typer.Typer(help="Configure an ABI-verified mint target")
+target_app = typer.Typer(help="Configure a mint target")
 service_app = typer.Typer(help="Manage the systemd service")
 app.add_typer(config_app, name="config")
 app.add_typer(wallet_app, name="wallet")
@@ -338,63 +339,109 @@ def easy_start() -> None:
     console.print(f"[green]Encrypted wallet ready: {abbreviated(address)}[/green]")
 
     console.print("\n[bold]5. NFT mint target[/bold]")
-    contract = validate_contract_address(ask("Paste the NFT contract address"))
-    abi_choice = choose(
-        "Select how to provide the verified ABI",
+    target_choice = choose(
+        "Select how to add the NFT",
         [
-            "Paste a direct HTTPS ABI/explorer API link",
-            "Enter the path to an ABI JSON file already on this VPS",
+            "Paste an OpenSea NFT mint link (no contract or ABI needed)",
+            "Paste the NFT contract and provide its verified ABI",
         ],
     )
-    if abi_choice == 1:
-        abi_url = ask("Paste the direct HTTPS ABI JSON link")
-        abi_path_obj = root / "target" / "abi.json"
-        try:
-            asyncio.run(download_abi(abi_url, abi_path_obj))
-        except Exception as exc:
-            raise typer.BadParameter(redact(exc)) from exc
-    else:
-        abi_path_obj = Path(ask("Enter the ABI JSON file path")).expanduser().resolve()
-    abi_path = str(abi_path_obj)
-    abi = load_abi(abi_path)
-    candidates = mint_candidates(abi)
-    if not candidates:
-        raise typer.BadParameter("The ABI contains no payable/nonpayable mint functions")
-    function_choice = choose(
-        "Select the exact mint function",
-        [function_signature(item) for item in candidates],
-    )
-    selected_function = candidates[function_choice - 1]
-    function = str(selected_function["name"])
-    inputs = selected_function.get("inputs", [])
+    source: Literal["abi", "opensea"]
+    abi_path: str | None = None
+    function: str | None = None
     arguments: list[Any] = []
-    for index, item in enumerate(inputs, start=1):
-        type_name = str(item.get("type", "string"))
-        input_name = str(item.get("name") or f"argument_{index}")
-        while True:
-            raw_value = ask(f"Enter {input_name} ({type_name})")
-            try:
-                arguments.append(parse_abi_input(type_name, raw_value))
-                break
-            except SetupInputError as exc:
-                console.print(f"[yellow]{exc}[/yellow]")
-    resolve_function(abi, function, len(arguments))
-
+    opensea_slug: str | None = None
+    opensea_url: str | None = None
+    opensea_api_key_path: str | None = None
     suggested_quantity = "1"
-    for item, value in zip(inputs, arguments, strict=True):
-        name = str(item.get("name", "")).lower()
-        if name in {"quantity", "amount", "count", "qty"} and isinstance(value, int):
-            suggested_quantity = str(value)
-            break
+    if target_choice == 1:
+        if network_name != "mainnet":
+            raise typer.BadParameter("OpenSea mint links require Robinhood Chain mainnet")
+        source = "opensea"
+        opensea_url = ask("Paste the OpenSea NFT mint link")
+        try:
+            opensea_slug = parse_opensea_mint_url(opensea_url)
+            key_path = root / "secrets" / "opensea_api_key"
+
+            async def resolve_drop() -> tuple[str, str]:
+                client = OpenSeaClient(key_path)
+                try:
+                    drop = await client.get_drop(opensea_slug)
+                    return drop.chain, drop.contract
+                finally:
+                    await client.close()
+
+            drop_chain, contract = asyncio.run(resolve_drop())
+        except OpenSeaError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        if drop_chain != "robinhood":
+            raise typer.BadParameter(
+                f"That OpenSea drop is on '{drop_chain or 'an unknown chain'}', not Robinhood Chain"
+            )
+        opensea_api_key_path = str(key_path)
+        console.print(
+            f"[green]OpenSea drop verified: {opensea_slug} / {abbreviated(contract)}[/green]"
+        )
+    else:
+        source = "abi"
+        contract = validate_contract_address(ask("Paste the NFT contract address"))
+        abi_choice = choose(
+            "Select how to provide the verified ABI",
+            [
+                "Paste a direct HTTPS ABI/explorer API link",
+                "Enter the path to an ABI JSON file already on this VPS",
+            ],
+        )
+        if abi_choice == 1:
+            abi_url = ask("Paste the direct HTTPS ABI JSON link")
+            abi_path_obj = root / "target" / "abi.json"
+            try:
+                asyncio.run(download_abi(abi_url, abi_path_obj))
+            except Exception as exc:
+                raise typer.BadParameter(redact(exc)) from exc
+        else:
+            abi_path_obj = Path(ask("Enter the ABI JSON file path")).expanduser().resolve()
+        abi_path = str(abi_path_obj)
+        abi = load_abi(abi_path)
+        candidates = mint_candidates(abi)
+        if not candidates:
+            raise typer.BadParameter("The ABI contains no payable/nonpayable mint functions")
+        function_choice = choose(
+            "Select the exact mint function",
+            [function_signature(item) for item in candidates],
+        )
+        selected_function = candidates[function_choice - 1]
+        function = str(selected_function["name"])
+        inputs = selected_function.get("inputs", [])
+        for index, item in enumerate(inputs, start=1):
+            type_name = str(item.get("type", "string"))
+            input_name = str(item.get("name") or f"argument_{index}")
+            while True:
+                raw_value = ask(f"Enter {input_name} ({type_name})")
+                try:
+                    arguments.append(parse_abi_input(type_name, raw_value))
+                    break
+                except SetupInputError as exc:
+                    console.print(f"[yellow]{exc}[/yellow]")
+        resolve_function(abi, function, len(arguments))
+        for item, value in zip(inputs, arguments, strict=True):
+            name = str(item.get("name", "")).lower()
+            if name in {"quantity", "amount", "count", "qty"} and isinstance(value, int):
+                suggested_quantity = str(value)
+                break
+
     quantity = int(ask("NFT quantity for the safety limits", default=suggested_quantity))
-    value_eth = Decimal(ask("Exact total ETH value sent to the mint", default="0"))
+    value_eth = (
+        Decimal(ask("Exact total ETH value sent to the mint", default="0"))
+        if source == "abi"
+        else Decimal("0")
+    )
 
     console.print("\n[bold]6. Hard spending limits[/bold]")
-    max_price = Decimal(
-        ask("Maximum price per NFT in ETH", default=str(max(value_eth, Decimal("0.001"))))
-    )
+    max_price = Decimal(ask("Maximum price per NFT in ETH", default="0.001"))
     max_fee = Decimal(ask("Maximum network fee in ETH", default="0.005"))
-    max_total = Decimal(ask("Maximum total spend in ETH", default=str(value_eth + max_fee)))
+    suggested_total = max(value_eth, max_price * quantity) + max_fee
+    max_total = Decimal(ask("Maximum total spend in ETH", default=str(suggested_total)))
 
     mode_choice = choose(
         "7. Select execution mode",
@@ -427,11 +474,17 @@ def easy_start() -> None:
         ),
         wallet=WalletSettings(address=address, keystore_path=str(keystore_path)),
         target=TargetSettings(
-            name=f"{function} NFT mint",
+            name=(
+                f"OpenSea {opensea_slug} mint" if source == "opensea" else f"{function} NFT mint"
+            ),
+            source=source,
             contract=contract,
             abi_path=abi_path,
             function=function,
             arguments=arguments,
+            opensea_slug=opensea_slug,
+            opensea_url=opensea_url,
+            opensea_api_key_path=opensea_api_key_path,
             quantity=quantity,
             transaction_value_eth=value_eth,
         ),
@@ -445,13 +498,17 @@ def easy_start() -> None:
     )
     save_config(config)
 
+    mint_value_summary = (
+        "from OpenSea, limited below" if source == "opensea" else f"{value_eth} ETH"
+    )
     console.print(
         Panel(
             f"Network: {network.name} ({network.chain_id})\n"
             f"Wallet: {abbreviated(address)}\n"
             f"Contract: {abbreviated(contract)}\n"
-            f"Function: {function}\nQuantity: {quantity}\n"
-            f"Mint value: {value_eth} ETH\nMax fee: {max_fee} ETH\n"
+            f"Target: {opensea_slug if source == 'opensea' else function}\nQuantity: {quantity}\n"
+            f"Mint value: {mint_value_summary}\n"
+            f"Max fee: {max_fee} ETH\n"
             f"Max total: {max_total} ETH\nMode: {mode.value.upper()}\n"
             "The key is encrypted locally. Final simulation and limits remain mandatory.",
             title="Ready to start",
@@ -501,13 +558,37 @@ async def _doctor() -> list[tuple[str, bool, str]]:
             checks.append(("WebSocket newHeads", True, abbreviated(subscription)))
         except Exception as exc:
             checks.append(("WebSocket newHeads", False, redact(exc)))
-    try:
-        resolve_function(
-            load_abi(config.target.abi_path), config.target.function, len(config.target.arguments)
-        )
-        checks.append(("ABI/function", True, config.target.function))
-    except Exception as exc:
-        checks.append(("ABI/function", False, str(exc)))
+    if config.target.source == "opensea":
+        try:
+            assert config.target.opensea_api_key_path is not None
+            assert config.target.opensea_slug is not None
+            client = OpenSeaClient(Path(config.target.opensea_api_key_path))
+            try:
+                drop = await client.get_drop(config.target.opensea_slug)
+            finally:
+                await client.close()
+            checks.append(
+                (
+                    "OpenSea drop",
+                    drop.chain == "robinhood"
+                    and drop.contract.lower() == config.target.contract.lower(),
+                    f"{drop.slug} / {drop.chain}",
+                )
+            )
+        except Exception as exc:
+            checks.append(("OpenSea drop", False, redact(exc)))
+    else:
+        try:
+            assert config.target.abi_path is not None
+            assert config.target.function is not None
+            resolve_function(
+                load_abi(config.target.abi_path),
+                config.target.function,
+                len(config.target.arguments),
+            )
+            checks.append(("ABI/function", True, config.target.function))
+        except Exception as exc:
+            checks.append(("ABI/function", False, str(exc)))
     for finding in audit_permissions():
         checks.append((finding.name, finding.ok, finding.detail))
     if shutil.which("timedatectl"):
@@ -686,6 +767,11 @@ def stats() -> None:
 def profile(iterations: Annotated[int, typer.Option(min=10, max=10_000)] = 500) -> None:
     """Measure local ABI encoding only; does not broadcast."""
     config = load_config()
+    if config.target.source == "opensea":
+        console.print("OpenSea targets receive calldata from the official API at mint time.")
+        raise typer.Exit(0)
+    assert config.target.abi_path is not None
+    assert config.target.function is not None
     abi = load_abi(config.target.abi_path)
     samples = []
     from sniper.contract.analyzer import encode_call

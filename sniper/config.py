@@ -58,13 +58,27 @@ class TargetSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = "NFT mint"
+    source: Literal["abi", "opensea"] = "abi"
     contract: str
-    abi_path: str
-    function: str
+    abi_path: str | None = None
+    function: str | None = None
     arguments: list[Any] = Field(default_factory=list)
+    opensea_slug: str | None = None
+    opensea_url: str | None = None
+    opensea_api_key_path: str | None = None
     quantity: int = Field(default=1, ge=1, le=100)
     transaction_value_eth: Decimal = Field(default=Decimal("0"), ge=0)
     poll_interval_ms: int = Field(default=175, ge=75, le=10_000)
+
+    @model_validator(mode="after")
+    def source_fields(self) -> TargetSettings:
+        if self.source == "abi" and (not self.abi_path or not self.function):
+            raise ValueError("ABI targets require abi_path and function")
+        if self.source == "opensea" and (
+            not self.opensea_slug or not self.opensea_api_key_path or not self.opensea_url
+        ):
+            raise ValueError("OpenSea targets require a link, slug and local API key path")
+        return self
 
 
 class LimitSettings(BaseModel):
