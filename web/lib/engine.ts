@@ -123,9 +123,12 @@ export type ParseStats = {
   noTimestamp: number;
   saleEvents: number;
   saleAsSeller: number;
+  saleAsSellerPriced: number;
   saleAsBuyer: number;
   saleUnrelated: number;
   saleUnpriceable: number;
+  noPaymentObject: number;
+  paymentSymbols: Record<string, number>;
 };
 
 type Ledger = {
@@ -161,9 +164,12 @@ export function buildLedger(events: OsEvent[], address: string): Ledger {
     noTimestamp: 0,
     saleEvents: 0,
     saleAsSeller: 0,
+    saleAsSellerPriced: 0,
     saleAsBuyer: 0,
     saleUnrelated: 0,
     saleUnpriceable: 0,
+    noPaymentObject: 0,
+    paymentSymbols: {},
   };
   for (const event of events) {
     const label = (event.event_type ?? "unknown").toLowerCase();
@@ -202,6 +208,12 @@ export function buildLedger(events: OsEvent[], address: string): Ledger {
       stats.saleEvents += 1;
       if (price === null) stats.saleUnpriceable += 1;
       if (seller !== me && buyer !== me) stats.saleUnrelated += 1;
+      if (!event.payment) {
+        stats.noPaymentObject += 1;
+      } else {
+        const sym = (event.payment.symbol ?? "(none)").toUpperCase();
+        stats.paymentSymbols[sym] = (stats.paymentSymbols[sym] ?? 0) + 1;
+      }
 
       if (buyer === me) {
         stats.saleAsBuyer += 1;
@@ -216,6 +228,7 @@ export function buildLedger(events: OsEvent[], address: string): Ledger {
         stats.saleAsSeller += 1;
         salesSeen += 1;
         if (price === null) continue;
+        stats.saleAsSellerPriced += 1;
         disposals.push({ key, nft, soldEth: price, soldAt: at });
 
         const queue = lots.get(key) ?? [];
