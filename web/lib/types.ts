@@ -66,5 +66,6 @@ export type Autopsy = {
   biggestFumble: FumbleCard | null;
 
   topCollections: { collection: string; slug: string | null; pnlEth: number; trades: number }[];
+  parseStats?: unknown;
   limitations: string[];
 };

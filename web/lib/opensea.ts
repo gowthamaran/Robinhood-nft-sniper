@@ -98,13 +98,11 @@ export type OsEvent = {
 
 type EventsPage = { asset_events?: OsEvent[]; next?: string | null };
 
-/**
- * Pull account events newest-first, following `next` cursors until we run out
- * of pages, hit `maxEvents`, or run out of time budget.
- */
-export async function fetchAccountEvents(
+/** One paginated sweep of a single event type. */
+async function sweep(
   up: Upstream,
   address: string,
+  eventType: string,
   maxEvents: number,
   maxPages: number,
 ): Promise<{ events: OsEvent[]; truncated: boolean }> {
@@ -113,9 +111,7 @@ export async function fetchAccountEvents(
   let truncated = false;
 
   for (let page = 0; page < maxPages; page += 1) {
-    const params = new URLSearchParams({ chain: "ethereum", limit: "50" });
-    params.append("event_type", "sale");
-    params.append("event_type", "transfer");
+    const params = new URLSearchParams({ chain: "ethereum", limit: "50", event_type: eventType });
     if (cursor) params.set("next", cursor);
 
     const data: EventsPage | null = await up.get<EventsPage>(
@@ -143,6 +139,32 @@ export async function fetchAccountEvents(
   }
 
   return { events: events.slice(0, maxEvents), truncated };
+}
+
+/**
+ * Pull account events newest-first.
+ *
+ * Sales and transfers are swept separately: OpenSea honours only the last
+ * `event_type` in a query string, so asking for both at once silently returns
+ * transfers alone - which reads as "this wallet never sold anything".
+ * Sales get the larger share of the budget because they carry the prices.
+ */
+export async function fetchAccountEvents(
+  up: Upstream,
+  address: string,
+  maxEvents: number,
+  maxPages: number,
+): Promise<{ events: OsEvent[]; truncated: boolean }> {
+  const saleShare = Math.max(1, Math.round(maxPages * 0.6));
+  const transferShare = Math.max(1, maxPages - saleShare);
+
+  const sales = await sweep(up, address, "sale", maxEvents, saleShare);
+  const transfers = await sweep(up, address, "transfer", maxEvents, transferShare);
+
+  return {
+    events: [...sales.events, ...transfers.events],
+    truncated: sales.truncated || transfers.truncated,
+  };
 }
 
 export type OsHolding = {

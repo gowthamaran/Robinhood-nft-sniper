@@ -115,6 +115,19 @@ type Disposal = {
   soldAt: number;
 };
 
+/** Counters that make a disappointing result explainable rather than mysterious. */
+export type ParseStats = {
+  events: number;
+  byType: Record<string, number>;
+  noTokenKey: number;
+  noTimestamp: number;
+  saleEvents: number;
+  saleAsSeller: number;
+  saleAsBuyer: number;
+  saleUnrelated: number;
+  saleUnpriceable: number;
+};
+
 type Ledger = {
   closed: ClosedTrade[];
   disposals: Disposal[];
@@ -122,6 +135,7 @@ type Ledger = {
   buysSeen: number;
   salesSeen: number;
   earliest: number | null;
+  stats: ParseStats;
 };
 
 /**
@@ -140,9 +154,31 @@ export function buildLedger(events: OsEvent[], address: string): Ledger {
   let salesSeen = 0;
   let earliest: number | null = null;
 
+  const stats: ParseStats = {
+    events: events.length,
+    byType: {},
+    noTokenKey: 0,
+    noTimestamp: 0,
+    saleEvents: 0,
+    saleAsSeller: 0,
+    saleAsBuyer: 0,
+    saleUnrelated: 0,
+    saleUnpriceable: 0,
+  };
+  for (const event of events) {
+    const label = (event.event_type ?? "unknown").toLowerCase();
+    stats.byType[label] = (stats.byType[label] ?? 0) + 1;
+  }
+
   const ordered = events
     .map((event) => ({ event, at: toSeconds(event.event_timestamp ?? event.closing_date) }))
-    .filter((entry): entry is { event: OsEvent; at: number } => entry.at !== null)
+    .filter((entry): entry is { event: OsEvent; at: number } => {
+      if (entry.at === null) {
+        stats.noTimestamp += 1;
+        return false;
+      }
+      return true;
+    })
     .sort((a, b) => a.at - b.at);
 
   for (const { event, at } of ordered) {
@@ -150,7 +186,10 @@ export function buildLedger(events: OsEvent[], address: string): Ledger {
 
     const nft = nftOf(event);
     const key = tokenKey(nft);
-    if (!key) continue;
+    if (!key) {
+      stats.noTokenKey += 1;
+      continue;
+    }
 
     const type = (event.event_type ?? "").toLowerCase();
     const seller = (event.seller ?? "").toLowerCase();
@@ -160,8 +199,12 @@ export function buildLedger(events: OsEvent[], address: string): Ledger {
 
     if (type === "sale") {
       const price = paymentEth(event);
+      stats.saleEvents += 1;
+      if (price === null) stats.saleUnpriceable += 1;
+      if (seller !== me && buyer !== me) stats.saleUnrelated += 1;
 
       if (buyer === me) {
+        stats.saleAsBuyer += 1;
         buysSeen += 1;
         const queue = lots.get(key) ?? [];
         queue.push({ at, costEth: price, kind: "BUY", nft });
@@ -170,6 +213,7 @@ export function buildLedger(events: OsEvent[], address: string): Ledger {
       }
 
       if (seller === me) {
+        stats.saleAsSeller += 1;
         salesSeen += 1;
         if (price === null) continue;
         disposals.push({ key, nft, soldEth: price, soldAt: at });
@@ -209,7 +253,7 @@ export function buildLedger(events: OsEvent[], address: string): Ledger {
     }
   }
 
-  return { closed, disposals, mintsAcquired, buysSeen, salesSeen, earliest };
+  return { closed, disposals, mintsAcquired, buysSeen, salesSeen, earliest, stats };
 }
 
 /* ------------------------------------------------------------------ */
