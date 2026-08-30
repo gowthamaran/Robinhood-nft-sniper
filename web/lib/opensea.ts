@@ -35,6 +35,11 @@ export class Upstream {
     return Date.now() - this.startedAt > this.budgetMs;
   }
 
+  /** True once at least one upstream call actually came back OK. */
+  get reachable(): boolean {
+    return this.calls.some((call) => call.status >= 200 && call.status < 300);
+  }
+
   async get<T>(path: string): Promise<T | null> {
     if (this.exhausted) return null;
     const started = Date.now();

@@ -7,7 +7,7 @@ import type { Autopsy } from "./types";
 
 export type LoadResult =
   | { ok: true; data: Autopsy }
-  | { ok: false; reason: "NOT_CONFIGURED" | "FAILED" };
+  | { ok: false; reason: "NOT_CONFIGURED" | "UNREACHABLE" | "FAILED" };
 
 /**
  * Single entry point for the page, its metadata and its OG image. `cache`
@@ -21,6 +21,11 @@ export const loadAutopsy = cache(async (address: string): Promise<LoadResult> =>
     const up = new Upstream(key);
     const ethUsd = await ethUsdRate();
     const data = await buildAutopsy(up, address.toLowerCase(), { ethUsd });
+
+    // An upstream that never answered is not the same as a wallet with no
+    // trades, and must never be rendered as one.
+    if (!up.reachable) return { ok: false, reason: "UNREACHABLE" };
+
     data.shareLine = buildShareText(data);
     return { ok: true, data };
   } catch (error) {

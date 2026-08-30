@@ -10,7 +10,7 @@ export async function ethUsdRate(): Promise<number | null> {
   try {
     const res = await fetch(
       "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
-      { signal: AbortSignal.timeout(4_000), next: { revalidate: 600 } },
+      { signal: AbortSignal.timeout(4_000) },
     );
     if (!res.ok) return cached?.value ?? null;
     const json = (await res.json()) as { ethereum?: { usd?: number } };

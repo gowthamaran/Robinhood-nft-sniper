@@ -32,6 +32,14 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ address: st
 
   try {
     const data = await buildAutopsy(up, address.toLowerCase(), { ethUsd });
+
+    if (!up.reachable) {
+      return Response.json(
+        { error: "UPSTREAM_UNREACHABLE", message: "OpenSea did not answer, so there is nothing to report." },
+        { status: 502 },
+      );
+    }
+
     data.shareLine = buildShareText(data);
 
     const payload: Record<string, unknown> = { ...data };

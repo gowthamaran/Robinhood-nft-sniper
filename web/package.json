@@ -11,7 +11,7 @@
     "test": "tsc -p tsconfig.test.json && node --test .test-build/tests/engine.test.js"
   },
   "dependencies": {
-    "next": "15.5.4",
+    "next": "15.5.24",
     "react": "19.1.0",
     "react-dom": "19.1.0"
   },

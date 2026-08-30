@@ -114,7 +114,7 @@ async function Result({ address }: { address: string }) {
           <p>
             {result.reason === "NOT_CONFIGURED"
               ? "This deployment has no OpenSea API key configured, so there is nothing honest to show."
-              : "OpenSea did not answer in time. This usually clears up within a minute."}
+              : "OpenSea did not answer, so we have nothing to report. An empty result would be a lie, not an autopsy. This usually clears up within a minute."}
           </p>
           <div>
             <Link className="button-link" href="/">
