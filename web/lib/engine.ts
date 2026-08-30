@@ -9,7 +9,19 @@ import {
 import type { Autopsy, Confidence, FumbleCard, Metric, TradeCard } from "./types";
 
 const ZERO = "0x0000000000000000000000000000000000000000";
-const ETH_LIKE = new Set(["ETH", "WETH"]);
+const ETH_LIKE = new Set(["ETH", "WETH", "BETH"]);
+
+/**
+ * Token contracts that are 1:1 with ETH. OpenSea frequently returns an empty
+ * `symbol` on the seller side of a trade - accepting a WETH offer - so the
+ * currency has to be recognised by address or every sale a wallet made is
+ * dropped as unpriceable.
+ */
+const ETH_EQUIVALENT_TOKENS = new Set([
+  ZERO,
+  "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", // WETH
+  "0x0000000000a39bb272e79075ade125fd351887ac", // Blur pool ETH
+]);
 const DAY = 86_400;
 const FLIP_WINDOW_DAYS = 7;
 
@@ -36,9 +48,16 @@ function toSeconds(value: number | string | undefined): number | null {
 function paymentEth(event: OsEvent): number | null {
   const payment = event.payment;
   if (!payment) return null;
-  const symbol = (payment.symbol ?? "").toUpperCase();
-  if (symbol && !ETH_LIKE.has(symbol)) return null;
-  if (!symbol && payment.token_address && payment.token_address !== ZERO) return null;
+
+  const symbol = (payment.symbol ?? "").trim().toUpperCase();
+  const token = (payment.token_address ?? "").trim().toLowerCase();
+
+  if (symbol) {
+    if (!ETH_LIKE.has(symbol)) return null;
+  } else if (token && !ETH_EQUIVALENT_TOKENS.has(token)) {
+    // Unlabelled and not a known ETH-equivalent contract: refuse to guess.
+    return null;
+  }
 
   const rawQuantity = payment.quantity;
   if (rawQuantity === undefined || rawQuantity === null) return null;

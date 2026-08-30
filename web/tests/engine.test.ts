@@ -162,3 +162,50 @@ test("personality reflects the numbers", () => {
     "GHOST WALLET",
   );
 });
+
+test("prices a WETH offer that arrives with an empty symbol", () => {
+  // OpenSea returns symbol "" on the seller side of an accepted WETH offer.
+  const wethSale: OsEvent = {
+    event_type: "sale",
+    event_timestamp: 2000,
+    seller: ME,
+    buyer: OTHER,
+    payment: {
+      quantity: "2500000000000000000",
+      decimals: 18,
+      symbol: "",
+      token_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+    },
+    nft: { identifier: "11", contract: "0xc0ffee", collection: "cool-cats" },
+  };
+  const ledger = buildLedger(
+    [sale({ at: 1000, id: "11", buyer: ME, seller: OTHER, price: 1 }), wethSale],
+    ME,
+  );
+  assert.equal(ledger.closed.length, 1);
+  assert.equal(ledger.closed[0].soldEth, 2.5);
+  assert.equal(ledger.closed[0].pnlEth, 1.5);
+  assert.equal(ledger.disposals.length, 1);
+});
+
+test("still refuses an unlabelled payment in an unknown token", () => {
+  const mysterySale: OsEvent = {
+    event_type: "sale",
+    event_timestamp: 2000,
+    seller: ME,
+    buyer: OTHER,
+    payment: {
+      quantity: "1000000",
+      decimals: 6,
+      symbol: "",
+      token_address: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    },
+    nft: { identifier: "12", contract: "0xc0ffee", collection: "cool-cats" },
+  };
+  const ledger = buildLedger(
+    [sale({ at: 1000, id: "12", buyer: ME, seller: OTHER, price: 1 }), mysterySale],
+    ME,
+  );
+  assert.equal(ledger.closed.length, 0);
+  assert.equal(ledger.disposals.length, 0);
+});
