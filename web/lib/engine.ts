@@ -26,7 +26,7 @@ const DAY = 86_400;
 const FLIP_WINDOW_DAYS = 7;
 
 export const MAX_EVENTS = 1_000;
-export const MAX_EVENT_PAGES = 20;
+export const MAX_EVENT_PAGES = 26;
 export const MAX_HOLDINGS = 200;
 
 /* ------------------------------------------------------------------ */

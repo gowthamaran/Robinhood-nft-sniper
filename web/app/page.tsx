@@ -24,8 +24,8 @@ export default function HomePage() {
             lost, and what you left on the table.
           </p>
           <WalletSearch />
-          <Link className="demo-link" href="/wallet/0xd8da6bf26964af9d7eed9e03e53415d37aa96045">
-            or autopsy vitalik.eth first →
+          <Link className="demo-link" href="/wallet/0xd387a6e4e84a6c86bd90c158c6028a58cc8ac459">
+            or open a real autopsy first →
           </Link>
           <p className="privacy-note">
             No wallet connection. No signing. Just public onchain embarrassment.

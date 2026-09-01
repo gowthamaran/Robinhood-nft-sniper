@@ -147,7 +147,10 @@ async function sweep(
  * Sales and transfers are swept separately: OpenSea honours only the last
  * `event_type` in a query string, so asking for both at once silently returns
  * transfers alone - which reads as "this wallet never sold anything".
- * Sales get the larger share of the budget because they carry the prices.
+ * Sales get almost the whole budget: they carry every price, and a heavy
+ * trader's sales come back newest-first, so the purchases that funded them sit
+ * further back in the same feed. Transfers only need enough depth to catch
+ * mints and airdrops.
  */
 export async function fetchAccountEvents(
   up: Upstream,
@@ -155,7 +158,7 @@ export async function fetchAccountEvents(
   maxEvents: number,
   maxPages: number,
 ): Promise<{ events: OsEvent[]; truncated: boolean }> {
-  const saleShare = Math.max(1, Math.round(maxPages * 0.6));
+  const saleShare = Math.max(1, Math.round(maxPages * 0.77));
   const transferShare = Math.max(1, maxPages - saleShare);
 
   const sales = await sweep(up, address, "sale", maxEvents, saleShare);
